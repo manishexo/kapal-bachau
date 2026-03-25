@@ -299,36 +299,49 @@
     }
   };
   
-  // Audio - bg.mp3
+  // ========== FIXED AUDIO - bg.mp3 ==========
   let bgMusic = null;
   let musicPlaying = false;
   
   function startMusic() {
     try {
+      // Stop any existing music
       if (bgMusic) {
         bgMusic.pause();
         bgMusic = null;
       }
-      bgMusic = new Audio("bg.mp3");
-      bgMusic.loop = true;
-      bgMusic.volume = 0.45;
       
+      // Create new audio element
+      bgMusic = new Audio();
+      bgMusic.src = "bg.mp3";
+      bgMusic.loop = true;
+      bgMusic.volume = 0.5;
+      
+      // Load the audio
+      bgMusic.load();
+      
+      // Play with user interaction guarantee (click on start button already happened)
       const playPromise = bgMusic.play();
+      
       if (playPromise !== undefined) {
         playPromise.then(() => {
           musicPlaying = true;
-          console.log("🎵 Music playing!");
-        }).catch((err) => {
-          console.log("Auto-play blocked - tap anywhere to enable music");
-          const unlockAudio = () => {
-            if (gameRunning && !musicPlaying) {
-              bgMusic.play().then(() => musicPlaying = true).catch(() => {});
+          console.log("✅ bg.mp3 is playing!");
+        }).catch((error) => {
+          console.log("Play failed:", error);
+          // Fallback: try playing on next user interaction
+          const tryPlayAgain = () => {
+            if (gameRunning && !musicPlaying && bgMusic) {
+              bgMusic.play().then(() => {
+                musicPlaying = true;
+                console.log("✅ Music started on retry!");
+              }).catch(() => {});
             }
-            document.removeEventListener('click', unlockAudio);
-            document.removeEventListener('touchstart', unlockAudio);
+            document.removeEventListener('click', tryPlayAgain);
+            document.removeEventListener('touchstart', tryPlayAgain);
           };
-          document.addEventListener('click', unlockAudio);
-          document.addEventListener('touchstart', unlockAudio);
+          document.addEventListener('click', tryPlayAgain);
+          document.addEventListener('touchstart', tryPlayAgain);
         });
       }
     } catch(e) {
@@ -696,7 +709,7 @@
     requestAnimationFrame(animate);
   }
   
-  // START GAME
+  // START GAME - WITH MUSIC
   function startGame() {
     document.getElementById('startScreen').classList.add('hidden');
     
@@ -713,6 +726,8 @@
     enemyX = -220;
     
     updateUI();
+    
+    // START MUSIC - NOW IT WILL DEFINITELY PLAY
     startMusic();
   }
   
@@ -731,6 +746,8 @@
     
     document.getElementById('gameStatus').classList.add('hidden');
     updateUI();
+    
+    // Restart music
     startMusic();
   }
   
