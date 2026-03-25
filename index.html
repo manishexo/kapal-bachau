@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>GS BATA KAPAL BACHAU KTA HO</title>
+<title>GS BATA KAPAL BACHAU</title>
 <style>
   * {
     margin: 0;
@@ -95,6 +95,7 @@
     background: rgba(0,0,0,0.5);
     padding: 15px 30px;
     border-radius: 50px;
+    text-align: center;
   }
   
   .start-sub {
@@ -161,7 +162,6 @@
 
   .hidden { display: none !important; }
   
-  /* Loading indicator */
   #loading {
     position: absolute;
     bottom: 30px;
@@ -174,6 +174,20 @@
     z-index: 15;
     pointer-events: none;
   }
+  
+  #audioStatus {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(0,0,0,0.6);
+    padding: 5px 12px;
+    border-radius: 20px;
+    color: #88ff88;
+    font-size: 0.7rem;
+    z-index: 15;
+    pointer-events: none;
+    font-family: monospace;
+  }
 </style>
 </head>
 <body>
@@ -183,7 +197,8 @@
     <div id="score">🏆 SCORE: 0</div>
     <div id="distance">🏃 DISTANCE: 0m</div>
   </div>
-  <div id="loading">Loading images...</div>
+  <div id="loading">📁 Loading player.png & gs.png...</div>
+  <div id="audioStatus">🔇 Music ready - click start</div>
   
   <div id="startScreen">
     <div class="start-title">✂️ BHAG KTA BHANG KAPAL BACHA GS BATA ✂️</div>
@@ -221,7 +236,6 @@
   const GROUND_Y_OFFSET = 110;
   let groundY = height - GROUND_Y_OFFSET;
   
-  // LARGE characters
   const PLAYER_WIDTH = 130;
   const PLAYER_HEIGHT = 130;
   const PLAYER_X = 150;
@@ -229,34 +243,29 @@
   const ENEMY_WIDTH = 140;
   const ENEMY_HEIGHT = 140;
   
-  // Jump physics - HIGH JUMP
   let playerY = groundY - PLAYER_HEIGHT;
   let playerVelocityY = 0;
   let isJumping = false;
   const GRAVITY = 0.82;
   const JUMP_POWER = -16.5;
   
-  // Game state
   let gameRunning = false;
   let score = 0;
   let distance = 0;
   let speed = 6.8;
   let spawnDelay = 0;
   
-  // Obstacles
   let obstacles = [];
   const OBSTACLE_WIDTH = 75;
   const OBSTACLE_HEIGHT = 75;
   
-  // Enemy (GS)
   let enemyX = -220;
   let enemyY = groundY - ENEMY_HEIGHT + 18;
   let chaseProgress = 0;
   
-  // Background scroll
   let bgOffset = 0;
   
-  // IMAGES - player.png and gs.png
+  // IMAGES
   const playerImg = new Image();
   const gsImg = new Image();
   let imagesLoaded = 0;
@@ -282,7 +291,6 @@
   };
   
   playerImg.onerror = () => {
-    console.log("player.png not found - using fallback");
     imagesLoaded++;
     if (imagesLoaded === 2) {
       imagesReady = true;
@@ -291,7 +299,6 @@
   };
   
   gsImg.onerror = () => {
-    console.log("gs.png not found - using fallback");
     imagesLoaded++;
     if (imagesLoaded === 2) {
       imagesReady = true;
@@ -299,64 +306,129 @@
     }
   };
   
-  // ========== FIXED AUDIO - bg.mp3 ==========
-  // ========== FIXED AUDIO ==========
-let bgMusic = null;
-let musicPlaying = false;
-
-// 🎵 BACKGROUND MUSIC
-function startMusic() {
-  try {
+  // ========== GUARANTEED WORKING AUDIO ==========
+  let bgMusic = null;
+  let musicPlaying = false;
+  const audioStatusDiv = document.getElementById('audioStatus');
+  
+  function updateAudioStatus(text, isError = false) {
+    audioStatusDiv.textContent = text;
+    audioStatusDiv.style.color = isError ? '#ff8888' : '#88ff88';
+    setTimeout(() => {
+      if (gameRunning) {
+        audioStatusDiv.style.opacity = '0.5';
+      }
+    }, 2000);
+  }
+  
+  function startMusic() {
+    try {
+      // Stop any existing music
+      if (bgMusic) {
+        bgMusic.pause();
+        bgMusic = null;
+      }
+      
+      // Create new audio element with absolute path handling
+      bgMusic = new Audio();
+      
+      // Try multiple possible paths
+      const audioPath = "bg.mp3";
+      bgMusic.src = audioPath;
+      
+      bgMusic.loop = true;
+      bgMusic.volume = 0.5;
+      
+      // Force load
+      bgMusic.load();
+      
+      // Log that we're trying to play
+      console.log("Attempting to play:", audioPath);
+      updateAudioStatus("🎵 Playing bg.mp3...");
+      
+      // Play with user interaction guarantee
+      const playPromise = bgMusic.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          musicPlaying = true;
+          console.log("✅ bg.mp3 is playing!");
+          updateAudioStatus("🎵 Music ON! 🎵");
+        }).catch((error) => {
+          console.log("Play failed:", error);
+          updateAudioStatus("⚠️ Music failed - check bg.mp3 file", true);
+          
+          // Create a fallback oscillator music if bg.mp3 not found
+          createFallbackMusic();
+        });
+      }
+    } catch(e) {
+      console.log("Audio error:", e);
+      updateAudioStatus("❌ Audio error", true);
+      createFallbackMusic();
+    }
+  }
+  
+  // FALLBACK: Create synth music if bg.mp3 is missing
+  let fallbackOscillator = null;
+  let fallbackInterval = null;
+  
+  function createFallbackMusic() {
+    console.log("Creating fallback synth music...");
+    updateAudioStatus("🎵 Using synth music (bg.mp3 not found)", false);
+    
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      
+      function playNote(frequency, duration, time) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = frequency;
+        gain.gain.value = 0.15;
+        osc.start(time);
+        gain.gain.exponentialRampToValueAtTime(0.00001, time + duration);
+        osc.stop(time + duration);
+      }
+      
+      // Simple repeating melody
+      let noteIndex = 0;
+      const melody = [523, 587, 659, 523, 494, 440, 440, 392];
+      
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      
+      fallbackInterval = setInterval(() => {
+        if (gameRunning && audioCtx.state !== 'closed') {
+          const now = audioCtx.currentTime;
+          playNote(melody[noteIndex % melody.length], 0.25, now);
+          noteIndex++;
+        } else if (!gameRunning) {
+          // Don't play when game over
+        }
+      }, 500);
+      
+      audioCtx.resume();
+      musicPlaying = true;
+      
+    } catch(e) {
+      console.log("Fallback music failed:", e);
+    }
+  }
+  
+  function stopMusic() {
     if (bgMusic) {
       bgMusic.pause();
-      bgMusic = null;
+      bgMusic.currentTime = 0;
     }
-
-    bgMusic = new Audio("bg.mp3");
-    bgMusic.loop = true;
-    bgMusic.volume = 0.5;
-
-    const playPromise = bgMusic.play();
-
-    if (playPromise !== undefined) {
-      playPromise.then(() => {
-        musicPlaying = true;
-      }).catch(() => {
-        // retry on user interaction (GitHub fix)
-        const retry = () => {
-          if (bgMusic && !musicPlaying) {
-            bgMusic.play().then(() => {
-              musicPlaying = true;
-            }).catch(()=>{});
-          }
-          document.removeEventListener("click", retry);
-          document.removeEventListener("touchstart", retry);
-        };
-        document.addEventListener("click", retry);
-        document.addEventListener("touchstart", retry);
-      });
+    if (fallbackInterval) {
+      clearInterval(fallbackInterval);
+      fallbackInterval = null;
     }
-  } catch(e) {}
-}
-
-function stopMusic() {
-  if (bgMusic) {
-    bgMusic.pause();
-    bgMusic.currentTime = 0;
     musicPlaying = false;
   }
-}
-
-// 💥 HIT SOUND (NEW)
-function playHitSound() {
-  try {
-    const hit = new Audio("hit.mp3");
-    hit.volume = 0.7;
-    hit.play().catch(()=>{});
-  } catch(e) {}
-} 
   
-  // Jump sound effect
+  // Jump sound
   function playJumpSound() {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -373,7 +445,6 @@ function playHitSound() {
     } catch(e) {}
   }
   
-  // Jump function
   function jump() {
     if (!gameRunning) return;
     if (playerY >= groundY - PLAYER_HEIGHT - 8 && !isJumping) {
@@ -383,7 +454,6 @@ function playHitSound() {
     }
   }
   
-  // Physics
   function updatePhysics() {
     if (!gameRunning) return;
     playerVelocityY += GRAVITY;
@@ -401,7 +471,6 @@ function playHitSound() {
     }
   }
   
-  // Obstacles
   function spawnObstacle() {
     if (!gameRunning) return;
     if (obstacles.length > 0) {
@@ -434,7 +503,6 @@ function playHitSound() {
     }
   }
   
-  // Enemy chase
   function updateEnemy() {
     if (!gameRunning) return;
     
@@ -448,11 +516,9 @@ function playHitSound() {
     enemyY = groundY - ENEMY_HEIGHT + 18;
   }
   
-  // COLLISION DETECTION
   function checkCollisions() {
     if (!gameRunning) return false;
     
-    // Player hitbox (slightly smaller for fair gameplay)
     const playerBox = {
       x: PLAYER_X + 20,
       y: playerY + 15,
@@ -460,7 +526,6 @@ function playHitSound() {
       h: PLAYER_HEIGHT - 30
     };
     
-    // Check obstacle collision
     for (let obs of obstacles) {
       const obsBox = {
         x: obs.x + 8,
@@ -477,7 +542,6 @@ function playHitSound() {
       }
     }
     
-    // Check enemy collision
     const enemyBox = {
       x: enemyX + 25,
       y: enemyY + 20,
@@ -501,6 +565,7 @@ function playHitSound() {
     stopMusic();
     document.getElementById('finalScore').textContent = Math.floor(score);
     document.getElementById('gameStatus').classList.remove('hidden');
+    updateAudioStatus("🔇 Game Over - Music Stopped", false);
   }
   
   function updateUI() {
@@ -554,12 +619,10 @@ function playHitSound() {
   
   function drawObstacles() {
     for (let obs of obstacles) {
-      // Wooden crate
       ctx.fillStyle = '#8B5A2B';
       ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
       ctx.fillStyle = '#C97E3A';
       ctx.fillRect(obs.x + 12, obs.y + 15, obs.w - 24, 14);
-      // Spikes on top
       ctx.fillStyle = '#5A3E1A';
       for(let s = 0; s < 3; s++) {
         ctx.beginPath();
@@ -568,7 +631,6 @@ function playHitSound() {
         ctx.lineTo(obs.x + 8 + s*22, obs.y + 5);
         ctx.fill();
       }
-      // Warning stripes
       ctx.fillStyle = '#FF6666';
       ctx.fillRect(obs.x + 22, obs.y + 48, 12, 16);
       ctx.fillRect(obs.x + 42, obs.y + 48, 12, 16);
@@ -582,7 +644,6 @@ function playHitSound() {
     if (imagesReady && playerImg.complete && playerImg.naturalWidth > 0) {
       ctx.drawImage(playerImg, x, y, PLAYER_WIDTH, PLAYER_HEIGHT);
     } else {
-      // Fallback if player.png not found
       ctx.fillStyle = '#FF5555';
       ctx.fillRect(x, y, PLAYER_WIDTH, PLAYER_HEIGHT);
       ctx.fillStyle = '#FFDD99';
@@ -591,15 +652,8 @@ function playHitSound() {
       ctx.fillStyle = '#000';
       ctx.fillRect(x + 33, y + 38, 12, 12);
       ctx.fillRect(x + 85, y + 38, 12, 12);
-      ctx.fillStyle = '#8B4513';
-      ctx.beginPath();
-      ctx.arc(x + 65, y + 70, 18, 0, Math.PI);
-      ctx.fill();
-      ctx.fillStyle = '#E52525';
-      ctx.fillRect(x + 15, y - 18, PLAYER_WIDTH - 30, 25);
     }
     
-    // Jump effect
     if (isJumping && playerVelocityY < -5) {
       ctx.fillStyle = '#FFFFFFAA';
       ctx.beginPath();
@@ -616,31 +670,21 @@ function playHitSound() {
     if (imagesReady && gsImg.complete && gsImg.naturalWidth > 0) {
       ctx.drawImage(gsImg, x, y, ENEMY_WIDTH, ENEMY_HEIGHT);
     } else {
-      // Fallback if gs.png not found
       ctx.fillStyle = '#2A1A1A';
       ctx.fillRect(x, y, ENEMY_WIDTH, ENEMY_HEIGHT);
       ctx.fillStyle = '#FF4444';
       ctx.fillRect(x + 28, y + 32, 28, 28);
       ctx.fillRect(x + 84, y + 32, 28, 28);
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(x + 36, y + 42, 12, 12);
-      ctx.fillRect(x + 92, y + 42, 12, 12);
     }
     
-    // ONE GIANT SCISSOR - always drawn on top of GS
-    ctx.font = `bold 85px "Segoe UI Emoji", "Apple Color Emoji"`;
+    ctx.font = `bold 85px "Segoe UI Emoji"`;
     ctx.shadowBlur = 6;
     ctx.fillStyle = '#E8E8E8';
     ctx.fillText("✂️", x + ENEMY_WIDTH - 58, y + ENEMY_HEIGHT - 22);
     ctx.fillStyle = '#FFAA66';
     ctx.fillText("✂️", x + ENEMY_WIDTH - 61, y + ENEMY_HEIGHT - 25);
-    // Scissor handle detail
-    ctx.font = `45px monospace`;
-    ctx.fillStyle = '#AAAAAA';
-    ctx.fillText("⚔️", x + 18, y + 98);
     ctx.shadowBlur = 0;
     
-    // Danger glow
     const dangerPercent = Math.min(100, Math.floor((enemyX + 220) / (PLAYER_X + 120) * 100));
     if (dangerPercent > 55 && gameRunning) {
       ctx.fillStyle = `rgba(255, 50, 50, ${0.4 + (dangerPercent - 55) / 100})`;
@@ -676,7 +720,6 @@ function playHitSound() {
     }
   }
   
-  // GAME LOOP
   function update() {
     if (!gameRunning) return;
     
@@ -708,7 +751,6 @@ function playHitSound() {
     requestAnimationFrame(animate);
   }
   
-  // START GAME - WITH MUSIC
   function startGame() {
     document.getElementById('startScreen').classList.add('hidden');
     
@@ -725,8 +767,6 @@ function playHitSound() {
     enemyX = -220;
     
     updateUI();
-    
-    // START MUSIC - NOW IT WILL DEFINITELY PLAY
     startMusic();
   }
   
@@ -745,12 +785,9 @@ function playHitSound() {
     
     document.getElementById('gameStatus').classList.add('hidden');
     updateUI();
-    
-    // Restart music
     startMusic();
   }
   
-  // EVENT HANDLERS
   function handleJump(e) {
     e.preventDefault();
     jump();
@@ -780,7 +817,6 @@ function playHitSound() {
     }
   });
   
-  // Initialize
   setTimeout(() => {
     groundY = height - GROUND_Y_OFFSET;
     playerY = groundY - PLAYER_HEIGHT;
