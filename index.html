@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Scissor Chase - Mario Style Runner</title>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a2f3a;overflow:hidden;font-family:monospace}
+#gameContainer{position:relative;width:100vw;height:100vh}
+canvas{width:100%;height:100%}
+
+#ui{
+position:absolute;top:20px;left:0;right:0;
+display:flex;justify-content:space-between;
+padding:0 20px;color:#fff;font-weight:bold;
+}
+
+#startScreen{
+position:absolute;top:0;left:0;width:100%;height:100%;
+display:flex;justify-content:center;align-items:center;
+flex-direction:column;background:#000;z-index:10;
+}
+
+#startBtn{
+padding:20px 40px;font-size:2rem;
+background:orange;border:none;border-radius:50px;
+}
+
+#gameStatus{
+position:absolute;top:50%;left:50%;
+transform:translate(-50%,-50%);
+background:#000;padding:20px;color:white;
+display:none;text-align:center;
+}
+</style>
+</head>
+
+<body>
+<div id="gameContainer">
+<canvas id="gameCanvas"></canvas>
+
+<div id="ui">
+<div id="score">Score: 0</div>
+<div id="distance">Distance: 0</div>
+</div>
+
+<div id="startScreen">
+<h1 style="color:white">SCISSOR CHASE</h1>
+<button id="startBtn">START</button>
+</div>
+
+<div id="gameStatus">
+<h1>GAME OVER</h1>
+<p id="finalScore"></p>
+<button onclick="restartGame()">Restart</button>
+</div>
+
+</div>
+
+<script>
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+let width=innerWidth;
+let height=innerHeight;
+canvas.width=width;
+canvas.height=height;
+
+let groundY=height-100;
+
+/* 🔥 BIG SIZES */
+const PLAYER_WIDTH=140;
+const PLAYER_HEIGHT=140;
+
+const ENEMY_WIDTH=160;
+const ENEMY_HEIGHT=160;
+
+const PLAYER_X=120;
+
+/* PLAYER */
+let playerY=groundY-PLAYER_HEIGHT;
+let velocityY=0;
+let gravity=0.8;
+let jumpPower=-16;
+let jumping=false;
+
+/* GAME */
+let gameRunning=false;
+let score=0;
+let distance=0;
+let speed=7;
+
+/* ENEMY */
+let enemyX=-200;
+let enemyY=groundY-ENEMY_HEIGHT;
+let chase=0;
+
+/* OBSTACLES */
+let obstacles=[];
+let spawnTimer=0;
+
+/* IMAGES */
+let playerImg=new Image();
+playerImg.src="player.png";
+
+let gsImg=new Image();
+gsImg.src="gs.png";
+
+/* AUDIO */
+let music=new Audio("bg.mp3");
+music.loop=true;
+
+/* START */
+document.getElementById("startBtn").onclick=()=>{
+gameRunning=true;
+document.getElementById("startScreen").style.display="none";
+music.play().catch(()=>{});
+};
+
+/* JUMP */
+function jump(){
+if(!gameRunning) return;
+
+if(playerY>=groundY-PLAYER_HEIGHT){
+velocityY=jumpPower;
+jumping=true;
+}
+}
+
+addEventListener("click",jump);
+addEventListener("keydown",e=>{
+if(e.code==="Space") jump();
+});
+
+/* GAME LOOP */
+function update(){
+
+if(!gameRunning) return;
+
+/* physics */
+velocityY+=gravity;
+playerY+=velocityY;
+
+if(playerY>=groundY-PLAYER_HEIGHT){
+playerY=groundY-PLAYER_HEIGHT;
+velocityY=0;
+jumping=false;
+}
+
+/* obstacles */
+spawnTimer++;
+if(spawnTimer>70){
+obstacles.push({x:width,y:groundY-60});
+spawnTimer=0;
+}
+
+for(let o of obstacles){
+o.x-=speed;
+}
+
+/* collision */
+let playerRect={
+x:PLAYER_X+20,
+y:playerY+20,
+w:PLAYER_WIDTH-40,
+h:PLAYER_HEIGHT-40
+};
+
+for(let o of obstacles){
+if(playerRect.x<o.x+50 &&
+playerRect.x+playerRect.w>o.x &&
+playerRect.y<o.y+50 &&
+playerRect.y+playerRect.h>o.y){
+gameOver();
+}
+}
+
+/* enemy chase */
+let target=PLAYER_X-20;
+chase+=0.003+(score/3000);
+if(chase>1) chase=1;
+
+enemyX=-200+(target+200)*chase;
+
+/* enemy collision */
+let enemyRect={
+x:enemyX+20,
+y:enemyY+20,
+w:ENEMY_WIDTH-40,
+h:ENEMY_HEIGHT-40
+};
+
+if(playerRect.x<enemyRect.x+enemyRect.w &&
+playerRect.x+playerRect.w>enemyRect.x &&
+playerRect.y<enemyRect.y+enemyRect.h &&
+playerRect.y+playerRect.h>enemyRect.y){
+gameOver();
+}
+
+/* score */
+score+=0.3;
+distance+=0.3;
+
+document.getElementById("score").innerText="Score: "+Math.floor(score);
+document.getElementById("distance").innerText="Distance: "+Math.floor(distance);
+
+}
+
+/* DRAW */
+function draw(){
+
+ctx.clearRect(0,0,width,height);
+
+/* ground */
+ctx.fillStyle="green";
+ctx.fillRect(0,groundY,width,5);
+
+/* player */
+if(playerImg.complete){
+ctx.drawImage(playerImg,PLAYER_X,playerY,PLAYER_WIDTH,PLAYER_HEIGHT);
+}else{
+ctx.fillRect(PLAYER_X,playerY,PLAYER_WIDTH,PLAYER_HEIGHT);
+}
+
+/* enemy */
+if(gsImg.complete){
+ctx.drawImage(gsImg,enemyX,enemyY,ENEMY_WIDTH,ENEMY_HEIGHT);
+}
+
+/* BIG SCISSOR */
+ctx.font="90px serif";
+ctx.fillText("✂️",enemyX+100,enemyY+140);
+
+/* obstacles */
+for(let o of obstacles){
+ctx.fillRect(o.x,o.y,50,50);
+}
+
+}
+
+/* GAME LOOP */
+function loop(){
+update();
+draw();
+requestAnimationFrame(loop);
+}
+loop();
+
+/* GAME OVER */
+function gameOver(){
+gameRunning=false;
+music.pause();
+
+document.getElementById("gameStatus").style.display="block";
+document.getElementById("finalScore").innerText="Score: "+Math.floor(score);
+}
+
+/* RESTART */
+function restartGame(){
+location.reload();
+}
+</script>
+</body>
+</html>
