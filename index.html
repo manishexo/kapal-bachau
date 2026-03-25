@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Chase Game</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    background: radial-gradient(circle at center, #6ad2ff 0%, #005f99 100%);
+    overflow: hidden;
+    touch-action: pan-x pan-y; /* Allow touch but prevent zoom */
+  }
+
+  #gameArea {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .character {
+    position: absolute;
+    width: 85px;  /* Increased from 60px */
+    height: 85px; /* Increased from 60px */
+    background-size: cover;
+    background-position: center;
+    transition: transform 0.1s linear;
+  }
+
+  #player {
+    background-image: url("player.png");
+  }
+
+  #gs {
+    background-image: url("gs.png");
+    position: relative;
+  }
+  
+  /* Scissor overlay for GS */
+  #gs::after {
+    content: "✂️";
+    position: absolute;
+    font-size: 35px;
+    bottom: -10px;
+    right: -15px;
+    filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.5));
+    pointer-events: none;
+    text-shadow: 0 0 3px silver;
+  }
+
+  .obstacle {
+    position: absolute;
+    width: 100px;
+    height: 100px;
+    background: linear-gradient(45deg, #333, #777);
+    box-shadow: 0 0 10px #0008;
+    border-radius: 10px;
+  }
+
+  #message {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-family: Arial, sans-serif;
+    font-size: 24px;
+    text-shadow: 2px 2px 4px #000;
+    z-index: 10;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 15px;
+    border-radius: 30px;
+    white-space: nowrap;
+  }
+
+  /* Joystick Styles */
+  .joystick-container {
+    position: fixed;
+    bottom: 80px;
+    left: 80px;
+    width: 120px;
+    height: 120px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 50%;
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    touch-action: none;
+  }
+  
+  .joystick-base {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+  }
+  
+  .joystick-thumb {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    transition: transform 0.02s linear;
+    pointer-events: none;
+  }
+  
+  @media (max-width: 768px) {
+    .joystick-container {
+      width: 100px;
+      height: 100px;
+      bottom: 60px;
+      left: 60px;
+    }
+    .joystick-thumb {
+      width: 42px;
+      height: 42px;
+    }
+    .character {
+      width: 75px;
+      height: 75px;
+    }
+    #message {
+      font-size: 18px;
+      white-space: nowrap;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .joystick-container {
+      width: 80px;
+      height: 80px;
+      bottom: 40px;
+      left: 40px;
+    }
+    .joystick-thumb {
+      width: 35px;
+      height: 35px;
+    }
+    .character {
+      width: 65px;
+      height: 65px;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="gameArea">
+  <div id="message">Use arrow keys or joystick to run!</div>
+  <div id="player" class="character"></div>
+  <div id="gs" class="character"></div>
+  
+  <!-- obstacles - added 5 more (total 8) -->
+  <div class="obstacle" style="left:300px; top:200px;"></div>
+  <div class="obstacle" style="left:800px; top:400px;"></div>
+  <div class="obstacle" style="left:500px; top:100px;"></div>
+  <div class="obstacle" style="left:100px; top:500px;"></div>
+  <div class="obstacle" style="left:700px; top:600px;"></div>
+  <div class="obstacle" style="left:950px; top:250px;"></div>
+  <div class="obstacle" style="left:400px; top:700px;"></div>
+  <div class="obstacle" style="left:1100px; top:500px;"></div>
+</div>
+
+<!-- Joystick Control -->
+<div class="joystick-container" id="joystickContainer">
+  <div class="joystick-base"></div>
+  <div class="joystick-thumb" id="joystickThumb"></div>
+</div>
+
+<script>
+  const player = document.getElementById("player");
+  const gs = document.getElementById("gs");
+  const obstacles = Array.from(document.querySelectorAll(".obstacle"));
+  const gameArea = document.getElementById("gameArea");
+  const msg = document.getElementById("message");
+
+  let playerPos = {x: 100, y: 100};
+  let gsPos = {x: 800, y: 500};
+  const speed = 5;
+  const gsSpeed = 2.2;
+  const keys = {};
+  
+  // Joystick variables
+  let joystickActive = false;
+  let joystickDirection = {x: 0, y: 0};
+  const joystickContainer = document.getElementById("joystickContainer");
+  const joystickThumb = document.getElementById("joystickThumb");
+  const maxDistance = 40; // Max thumb movement distance
+  
+  // Audio - bg.mp3
+  let bgMusic = null;
+  
+  function initAudio() {
+    bgMusic = new Audio("bg.mp3");
+    bgMusic.loop = true;
+    bgMusic.volume = 0.5;
+    // Try to play (will be blocked by browser until user interaction)
+    bgMusic.play().catch(e => {
+      console.log("Audio autoplay blocked - will play on first touch");
+      // Play on any user interaction
+      const playOnInteraction = () => {
+        bgMusic.play().catch(() => {});
+        document.removeEventListener("touchstart", playOnInteraction);
+        document.removeEventListener("click", playOnInteraction);
+      };
+      document.addEventListener("touchstart", playOnInteraction, {once: true});
+      document.addEventListener("click", playOnInteraction, {once: true});
+    });
+  }
+  
+  // Start music when game loads
+  initAudio();
+
+  // Keyboard controls (original)
+  document.addEventListener("keydown", e => keys[e.key] = true);
+  document.addEventListener("keyup", e => delete keys[e.key]);
+
+  // Joystick touch/mouse controls
+  function getJoystickPosition(clientX, clientY) {
+    const rect = joystickContainer.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    let dx = clientX - centerX;
+    let dy = clientY - centerY;
+    const distance = Math.min(Math.hypot(dx, dy), maxDistance);
+    const angle = Math.atan2(dy, dx);
+    
+    return {
+      x: Math.cos(angle) * distance,
+      y: Math.sin(angle) * distance,
+      normX: distance === 0 ? 0 : (dx / Math.hypot(dx, dy)) * (distance / maxDistance),
+      normY: distance === 0 ? 0 : (dy / Math.hypot(dx, dy)) * (distance / maxDistance)
+    };
+  }
+  
+  function updateJoystick(clientX, clientY) {
+    const pos = getJoystickPosition(clientX, clientY);
+    joystickThumb.style.transform = `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px)`;
+    joystickDirection = {x: pos.normX || 0, y: pos.normY || 0};
+  }
+  
+  function resetJoystick() {
+    joystickThumb.style.transform = "translate(-50%, -50%)";
+    joystickDirection = {x: 0, y: 0};
+  }
+  
+  // Touch events
+  joystickContainer.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    joystickActive = true;
+    const touch = e.touches[0];
+    updateJoystick(touch.clientX, touch.clientY);
+  });
+  
+  joystickContainer.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (joystickActive) {
+      const touch = e.touches[0];
+      updateJoystick(touch.clientX, touch.clientY);
+    }
+  });
+  
+  joystickContainer.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    joystickActive = false;
+    resetJoystick();
+  });
+  
+  // Mouse events for testing on desktop
+  joystickContainer.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    joystickActive = true;
+    updateJoystick(e.clientX, e.clientY);
+    
+    const onMouseMove = (moveEvent) => {
+      if (joystickActive) {
+        updateJoystick(moveEvent.clientX, moveEvent.clientY);
+      }
+    };
+    
+    const onMouseUp = () => {
+      joystickActive = false;
+      resetJoystick();
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+
+  // Modified movePlayer to support joystick
+  function movePlayer() {
+    let newX = playerPos.x;
+    let newY = playerPos.y;
+    
+    // Check joystick input first (priority over keyboard for mobile)
+    if (joystickActive || joystickDirection.x !== 0 || joystickDirection.y !== 0) {
+      newX += joystickDirection.x * speed;
+      newY += joystickDirection.y * speed;
+    } else {
+      // Original keyboard controls
+      if (keys["ArrowUp"]) newY -= speed;
+      if (keys["ArrowDown"]) newY += speed;
+      if (keys["ArrowLeft"]) newX -= speed;
+      if (keys["ArrowRight"]) newX += speed;
+    }
+
+    // Check collision with obstacles (preserved original logic with fix)
+    let collision = false;
+    const rect = {x: newX, y: newY, w: 85, h: 85};
+    for (let obs of obstacles) {
+      const oRect = obs.getBoundingClientRect();
+      if (rect.x < oRect.right && rect.x + rect.w > oRect.left &&
+          rect.y < oRect.bottom && rect.y + rect.h > oRect.top) {
+        collision = true;
+        break;
+      }
+    }
+    
+    if (!collision) {
+      playerPos.x = Math.max(0, Math.min(window.innerWidth - 85, newX));
+      playerPos.y = Math.max(0, Math.min(window.innerHeight - 85, newY));
+    }
+    player.style.transform = `translate(${playerPos.x}px, ${playerPos.y}px)`;
+  }
+
+  // Original moveGS function
+  function moveGS() {
+    const dx = playerPos.x - gsPos.x;
+    const dy = playerPos.y - gsPos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0) {
+      let newX = gsPos.x + (dx / dist) * gsSpeed;
+      let newY = gsPos.y + (dy / dist) * gsSpeed;
+      
+      // Check collision with obstacles
+      let collision = false;
+      const rect = {x: newX, y: newY, w: 85, h: 85};
+      for (let obs of obstacles) {
+        const oRect = obs.getBoundingClientRect();
+        if (rect.x < oRect.right && rect.x + rect.w > oRect.left &&
+            rect.y < oRect.bottom && rect.y + rect.h > oRect.top) {
+          collision = true;
+          break;
+        }
+      }
+      
+      if (!collision) {
+        gsPos.x = newX;
+        gsPos.y = newY;
+      }
+    }
+    gs.style.transform = `translate(${gsPos.x}px, ${gsPos.y}px)`;
+  }
+
+  // Original checkCaught function
+  function checkCaught() {
+    const dx = playerPos.x - gsPos.x;
+    const dy = playerPos.y - gsPos.y;
+    if (Math.abs(dx) < 65 && Math.abs(dy) < 65) { // Increased catch radius for larger characters
+      msg.textContent = "You got caught! Refresh to retry.";
+      if (bgMusic) bgMusic.pause();
+      cancelAnimationFrame(loopId);
+      return true;
+    }
+    return false;
+  }
+
+  function loop() {
+    movePlayer();
+    moveGS();
+    if (!checkCaught()) loopId = requestAnimationFrame(loop);
+  }
+
+  let loopId = requestAnimationFrame(loop);
+  
+  // Handle window resize to keep characters in bounds
+  window.addEventListener("resize", () => {
+    playerPos.x = Math.min(window.innerWidth - 85, playerPos.x);
+    playerPos.y = Math.min(window.innerHeight - 85, playerPos.y);
+    gsPos.x = Math.min(window.innerWidth - 85, gsPos.x);
+    gsPos.y = Math.min(window.innerHeight - 85, gsPos.y);
+    player.style.transform = `translate(${playerPos.x}px, ${playerPos.y}px)`;
+    gs.style.transform = `translate(${gsPos.x}px, ${gsPos.y}px)`;
+  });
+</script>
+</body>
+</html>
