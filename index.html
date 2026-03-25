@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Scissor Chase - Mario Style Runner</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background: linear-gradient(180deg, #0a2f3a 0%, #1c5a6a 100%);
+    overflow: hidden;
+    font-family: 'Courier New', 'Press Start 2P', monospace;
+    touch-action: pan-y; /* Allow vertical scroll prevention */
+  }
+
+  #gameContainer {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: pointer;
+  }
+
+  /* UI Elements */
+  #ui {
+    position: absolute;
+    top: 20px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 10;
+    pointer-events: none;
+    font-family: monospace;
+    font-weight: bold;
+    text-shadow: 2px 2px 0 #000;
+  }
+
+  #score {
+    background: rgba(0,0,0,0.7);
+    padding: 8px 18px;
+    border-radius: 30px;
+    color: #ffd966;
+    font-size: 1.5rem;
+    backdrop-filter: blur(4px);
+    border: 1px solid gold;
+  }
+
+  #distance {
+    background: rgba(0,0,0,0.7);
+    padding: 8px 18px;
+    border-radius: 30px;
+    color: #88ffaa;
+    font-size: 1.5rem;
+    backdrop-filter: blur(4px);
+    border: 1px solid #88ffaa;
+  }
+
+  #gameStatus {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 20;
+    pointer-events: none;
+    background: rgba(0,0,0,0.85);
+    padding: 20px 40px;
+    border-radius: 20px;
+    border: 2px solid #ff6600;
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+  }
+
+  #gameStatus h1 {
+    color: #ffaa44;
+    font-size: 2rem;
+    margin-bottom: 15px;
+  }
+
+  #gameStatus p {
+    color: white;
+    font-size: 1.2rem;
+    margin: 8px 0;
+  }
+
+  #gameStatus button {
+    margin-top: 20px;
+    padding: 12px 30px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    background: #ff6600;
+    color: white;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    font-family: monospace;
+    pointer-events: auto;
+    transition: transform 0.1s;
+  }
+
+  #gameStatus button:active {
+    transform: scale(0.95);
+  }
+
+  .instruction {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    padding: 8px 16px;
+    border-radius: 40px;
+    color: #ddd;
+    font-size: 0.9rem;
+    z-index: 10;
+    pointer-events: none;
+    white-space: nowrap;
+    font-family: monospace;
+  }
+
+  @media (max-width: 600px) {
+    #score, #distance { font-size: 1rem; padding: 5px 12px; }
+    #gameStatus h1 { font-size: 1.4rem; }
+    #gameStatus p { font-size: 0.9rem; }
+    .instruction { font-size: 0.7rem; bottom: 10px; white-space: nowrap; }
+  }
+
+  .hidden {
+    display: none !important;
+  }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui">
+    <div id="score">🏆 SCORE: 0</div>
+    <div id="distance">🏃 DISTANCE: 0m</div>
+  </div>
+  <div id="gameStatus" class="hidden">
+    <h1>✂️ GAME OVER ✂️</h1>
+    <p>You were caught by the Scissor Demon!</p>
+    <p>Final Score: <span id="finalScore">0</span></p>
+    <button id="restartBtn">🔁 RUN AGAIN</button>
+  </div>
+  <div class="instruction">👇 TAP / CLICK ANYWHERE → JUMP over obstacles! 👆</div>
+</div>
+
+<script>
+  (function() {
+    // ---------- CANVAS SETUP ----------
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    
+    function resizeCanvas() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // ---------- GAME CONSTANTS ----------
+    const GROUND_Y_OFFSET = 80; // ground from bottom
+    let groundY = height - GROUND_Y_OFFSET;
+    
+    // Player settings
+    const PLAYER_WIDTH = 55;
+    const PLAYER_HEIGHT = 55;
+    const PLAYER_X = 120; // fixed horizontal position
+    
+    // Physics
+    let playerY = groundY - PLAYER_HEIGHT;
+    let playerVelocityY = 0;
+    let isJumping = false;
+    const GRAVITY = 0.8;
+    const JUMP_POWER = -12;
+    
+    // Game state
+    let gameRunning = true;
+    let score = 0;
+    let distance = 0;
+    let frame = 0;
+    let speed = 6; // base scrolling speed (increases with score)
+    
+    // Obstacles array
+    let obstacles = [];
+    const OBSTACLE_WIDTH = 45;
+    const OBSTACLE_HEIGHT = 45;
+    const OBSTACLE_SPAWN_RATE = 70; // frames between spawns
+    let spawnCounter = 0;
+    
+    // Enemy (GS) chasing - positioned behind the player, gets closer over time
+    let enemyX = -150; // starts off-screen left
+    let enemyY = groundY - 50;
+    const ENEMY_WIDTH = 60;
+    const ENEMY_HEIGHT = 60;
+    let chaseProgress = 0; // 0 to 1, how close enemy is to catching player
+    
+    // Background scrolling
+    let bgOffset = 0;
+    
+    // ---------- AUDIO ----------
+    let bgMusic = null;
+    let jumpSound = null;
+    let gameOverSound = null;
+    
+    function initAudio() {
+      // Create audio elements
+      bgMusic = new Audio();
+      bgMusic.loop = true;
+      bgMusic.volume = 0.4;
+      // Use embedded base64 silent fallback + actual bg.mp3
+      bgMusic.src = "bg.mp3";
+      
+      // Jump sound (simple beep using Web Audio for reliability)
+      try {
+        jumpSound = new Audio();
+        jumpSound.src = "data:audio/wav;base64,U3RlYWx0aCBzb3VuZA=="; // placeholder
+        // If we can't load, we'll create a beep via Web Audio
+        if (!jumpSound.canPlayType) jumpSound = null;
+      } catch(e) { jumpSound = null; }
+      
+      // Attempt to play music - browsers require user interaction
+      const attemptPlay = () => {
+        if (bgMusic && gameRunning) {
+          bgMusic.play().catch(e => console.log("Audio play blocked, will play on tap"));
+        }
+        document.removeEventListener('click', attemptPlay);
+        document.removeEventListener('touchstart', attemptPlay);
+      };
+      document.addEventListener('click', attemptPlay, { once: true });
+      document.addEventListener('touchstart', attemptPlay, { once: true });
+    }
+    
+    // Simple beep using Web Audio for jump effect
+    let audioCtx = null;
+    function playJumpBeep() {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.frequency.value = 880;
+        gainNode.gain.value = 0.2;
+        oscillator.start();
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
+        oscillator.stop(audioCtx.currentTime + 0.2);
+      } catch(e) { console.log("audio error"); }
+    }
+    
+    function playGameOverBeep() {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.frequency.value = 440;
+        gainNode.gain.value = 0.3;
+        oscillator.start();
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.6);
+        oscillator.stop(audioCtx.currentTime + 0.5);
+        
+        // second lower beep
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.frequency.value = 220;
+        gain2.gain.value = 0.2;
+        osc2.start(audioCtx.currentTime + 0.2);
+        gain2.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.8);
+        osc2.stop(audioCtx.currentTime + 0.7);
+      } catch(e) {}
+    }
+    
+    // ---------- GAME MECHANICS ----------
+    function jump() {
+      if (!gameRunning) return;
+      // Only jump if on ground
+      if (playerY >= groundY - PLAYER_HEIGHT - 1 && !isJumping) {
+        playerVelocityY = JUMP_POWER;
+        isJumping = true;
+        // Play jump sound
+        if (jumpSound) {
+          jumpSound.currentTime = 0;
+          jumpSound.play().catch(() => playJumpBeep());
+        } else {
+          playJumpBeep();
+        }
+      }
+    }
+    
+    function updatePhysics() {
+      if (!gameRunning) return;
+      
+      // Apply gravity
+      playerVelocityY += GRAVITY;
+      playerY += playerVelocityY;
+      
+      // Ground collision
+      if (playerY >= groundY - PLAYER_HEIGHT) {
+        playerY = groundY - PLAYER_HEIGHT;
+        playerVelocityY = 0;
+        isJumping = false;
+      }
+      
+      // Ceiling collision (optional)
+      if (playerY < 0) {
+        playerY = 0;
+        if (playerVelocityY < 0) playerVelocityY = 0;
+      }
+    }
+    
+    function spawnObstacle() {
+      // Don't spawn if game over
+      if (!gameRunning) return;
+      
+      // Avoid spawning too many overlapping obstacles
+      if (obstacles.length > 0) {
+        const last = obstacles[obstacles.length - 1];
+        if (last.x > width - 200) return; // too close
+      }
+      
+      obstacles.push({
+        x: width,
+        y: groundY - OBSTACLE_HEIGHT,
+        width: OBSTACLE_WIDTH,
+        height: OBSTACLE_HEIGHT,
+        passed: false
+      });
+    }
+    
+    function updateObstacles() {
+      if (!gameRunning) return;
+      
+      // Move obstacles left
+      for (let i = 0; i < obstacles.length; i++) {
+        obstacles[i].x -= speed;
+      }
+      
+      // Remove off-screen obstacles and award score
+      obstacles = obstacles.filter(obs => {
+        if (obs.x + OBSTACLE_WIDTH < 0) {
+          return false;
+        }
+        return true;
+      });
+      
+      // Score based on passing obstacles
+      for (let obs of obstacles) {
+        if (!obs.passed && obs.x + OBSTACLE_WIDTH < PLAYER_X) {
+          obs.passed = true;
+          score += 10;
+          updateUI();
+        }
+      }
+    }
+    
+    function checkCollisions() {
+      if (!gameRunning) return false;
+      
+      const playerRect = {
+        x: PLAYER_X,
+        y: playerY,
+        w: PLAYER_WIDTH,
+        h: PLAYER_HEIGHT
+      };
+      
+      // Check obstacle collision
+      for (let obs of obstacles) {
+        const obsRect = {
+          x: obs.x,
+          y: obs.y,
+          w: OBSTACLE_WIDTH,
+          h: OBSTACLE_HEIGHT
+        };
+        
+        if (playerRect.x < obsRect.x + obsRect.w &&
+            playerRect.x + playerRect.w > obsRect.x &&
+            playerRect.y < obsRect.y + obsRect.h &&
+            playerRect.y + playerRect.h > obsRect.y) {
+          gameOver();
+          return true;
+        }
+      }
+      
+      // Enemy catch logic: enemy gets closer over time and distance
+      // enemy X moves from -150 toward player X (120) based on chaseProgress
+      if (enemyX < PLAYER_X - 20) {
+        chaseProgress += 0.002 + (score / 5000); // speeds up as score increases
+        if (chaseProgress > 1) chaseProgress = 1;
+        enemyX = -150 + (PLAYER_X + 30) * chaseProgress;
+      }
+      
+      // Check if enemy catches player
+      const enemyRect = {
+        x: enemyX,
+        y: enemyY,
+        w: ENEMY_WIDTH,
+        h: ENEMY_HEIGHT
+      };
+      
+      if (playerRect.x < enemyRect.x + enemyRect.w &&
+          playerRect.x + playerRect.w > enemyRect.x &&
+          playerRect.y < enemyRect.y + enemyRect.h &&
+          playerRect.y + playerRect.h > enemyRect.y) {
+        gameOver();
+        return true;
+      }
+      
+      return false;
+    }
+    
+    function gameOver() {
+      if (!gameRunning) return;
+      gameRunning = false;
+      
+      // Stop music
+      if (bgMusic) {
+        bgMusic.pause();
+        bgMusic.currentTime = 0;
+      }
+      playGameOverBeep();
+      
+      // Show game over UI
+      const gameStatusDiv = document.getElementById('gameStatus');
+      const finalScoreSpan = document.getElementById('finalScore');
+      finalScoreSpan.textContent = Math.floor(score);
+      gameStatusDiv.classList.remove('hidden');
+    }
+    
+    function updateUI() {
+      document.getElementById('score').textContent = `🏆 SCORE: ${Math.floor(score)}`;
+      document.getElementById('distance').textContent = `🏃 DISTANCE: ${Math.floor(distance)}m`;
+    }
+    
+    // Increase difficulty over time
+    function updateDifficulty() {
+      if (!gameRunning) return;
+      // Increase speed gradually based on score
+      speed = 6 + Math.floor(score / 500);
+      if (speed > 15) speed = 15;
+      
+      // Update distance (running progress)
+      distance += 0.2;
+      updateUI();
+    }
+    
+    // ---------- DRAWING (Mario-style colorful graphics) ----------
+    function drawGround() {
+      // Ground with dirt style
+      ctx.fillStyle = '#8B5A2B';
+      ctx.fillRect(0, groundY - 10, width, 10);
+      ctx.fillStyle = '#C97E3A';
+      ctx.fillRect(0, groundY - 5, width, 5);
+      ctx.fillStyle = '#6B3E1A';
+      for(let i = 0; i < width; i += 40) {
+        ctx.fillRect(i + bgOffset % 40, groundY - 12, 15, 5);
+      }
+      
+      // Grass top
+      ctx.fillStyle = '#5A9E4E';
+      ctx.fillRect(0, groundY - 15, width, 8);
+      ctx.fillStyle = '#7CB518';
+      for(let i = 0; i < width; i += 25) {
+        ctx.beginPath();
+        ctx.moveTo(i + (bgOffset % 25), groundY - 18);
+        ctx.lineTo(i + 8 + (bgOffset % 25), groundY - 28);
+        ctx.lineTo(i - 8 + (bgOffset % 25), groundY - 28);
+        ctx.fill();
+      }
+    }
+    
+    function drawPlayer() {
+      // Mario-like runner
+      const x = PLAYER_X;
+      const y = playerY;
+      
+      // Cap
+      ctx.fillStyle = '#E52525';
+      ctx.fillRect(x + 5, y - 8, PLAYER_WIDTH - 10, 12);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x + 12, y - 5, 8, 5);
+      
+      // Face/body
+      ctx.fillStyle = '#FFCC88';
+      ctx.fillRect(x, y, PLAYER_WIDTH, PLAYER_HEIGHT);
+      // Eyes
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x + 10, y + 15, 12, 12);
+      ctx.fillRect(x + 33, y + 15, 12, 12);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(x + 14, y + 19, 5, 5);
+      ctx.fillRect(x + 37, y + 19, 5, 5);
+      // Mustache
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(x + 8, y + 28, 18, 6);
+      ctx.fillRect(x + 30, y + 28, 18, 6);
+      // Overalls
+      ctx.fillStyle = '#2C6E9E';
+      ctx.fillRect(x, y + 38, PLAYER_WIDTH, 17);
+      ctx.fillStyle = '#FFD966';
+      ctx.fillRect(x + 12, y + 45, 8, 12);
+      ctx.fillRect(x + 35, y + 45, 8, 12);
+    }
+    
+    function drawEnemy() {
+      // GS with scissors
+      const x = enemyX;
+      const y = enemyY;
+      if (x > width + 50) return;
+      
+      // Dark demon body
+      ctx.fillStyle = '#3A2A2A';
+      ctx.shadowBlur = 8;
+      ctx.fillRect(x, y, ENEMY_WIDTH, ENEMY_HEIGHT);
+      // Evil eyes
+      ctx.fillStyle = '#FF4444';
+      ctx.fillRect(x + 10, y + 15, 12, 12);
+      ctx.fillRect(x + 38, y + 15, 12, 12);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(x + 14, y + 19, 5, 5);
+      ctx.fillRect(x + 42, y + 19, 5, 5);
+      // Scissor weapon (large)
+      ctx.fillStyle = '#CCCCCC';
+      ctx.beginPath();
+      ctx.moveTo(x + 50, y + 30);
+      ctx.lineTo(x + 70, y + 20);
+      ctx.lineTo(x + 68, y + 28);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x + 52, y + 35);
+      ctx.lineTo(x + 72, y + 30);
+      ctx.lineTo(x + 70, y + 38);
+      ctx.fill();
+      ctx.fillStyle = '#FFAA33';
+      ctx.font = `bold ${ENEMY_WIDTH - 15}px monospace`;
+      ctx.fillText("✂️", x + 8, y + 50);
+      ctx.shadowBlur = 0;
+    }
+    
+    function drawObstacles() {
+      for (let obs of obstacles) {
+        // Spiky obstacle / box
+        ctx.fillStyle = '#8B5A2B';
+        ctx.shadowBlur = 4;
+        ctx.fillRect(obs.x, obs.y, OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
+        ctx.fillStyle = '#C97E3A';
+        ctx.fillRect(obs.x + 5, obs.y + 5, OBSTACLE_WIDTH - 10, 8);
+        ctx.fillStyle = '#5A3E1A';
+        for(let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(obs.x + 8 + i*12, obs.y - 5);
+          ctx.lineTo(obs.x + 14 + i*12, obs.y + 5);
+          ctx.lineTo(obs.x + 2 + i*12, obs.y + 5);
+          ctx.fill();
+        }
+        // warning stripes
+        ctx.fillStyle = '#FF4444';
+        ctx.fillRect(obs.x + 8, obs.y + 25, 8, 12);
+        ctx.fillRect(obs.x + 28, obs.y + 25, 8, 12);
+      }
+      ctx.shadowBlur = 0;
+    }
+    
+    function drawSky() {
+      // Gradient sky with clouds
+      const grad = ctx.createLinearGradient(0, 0, 0, groundY - 50);
+      grad.addColorStop(0, '#2C82C9');
+      grad.addColorStop(1, '#6FB3E0');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, groundY - 40);
+      
+      // Clouds
+      ctx.fillStyle = '#FFFFFFCC';
+      for(let i = 0; i < 3; i++) {
+        let cloudX = (bgOffset * 0.5 + i * 300) % (width + 200) - 100;
+        ctx.beginPath();
+        ctx.ellipse(cloudX, 60 + i*40, 50, 35, 0, 0, Math.PI*2);
+        ctx.ellipse(cloudX + 40, 45 + i*30, 45, 35, 0, 0, Math.PI*2);
+        ctx.ellipse(cloudX - 30, 50 + i*35, 45, 30, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+    
+    function drawUItext() {
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.fillStyle = '#FFDD88';
+      ctx.shadowBlur = 0;
+      if (gameRunning) {
+        ctx.fillText(`⚡ SPEED: ${Math.floor(speed)}`, width - 120, 50);
+        const chasePercent = Math.min(100, Math.floor((enemyX + 150) / (PLAYER_X + 150) * 100));
+        ctx.fillStyle = '#FF6666';
+        ctx.fillText(`✂️ DANGER: ${chasePercent}%`, width - 140, 90);
+      }
+    }
+    
+    function draw() {
+      if (!ctx) return;
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+      
+      drawSky();
+      drawGround();
+      drawObstacles();
+      drawPlayer();
+      drawEnemy();
+      drawUItext();
+      
+      // Particle effect while jumping
+      if (isJumping && playerVelocityY < 0) {
+        ctx.fillStyle = '#FFFFFFAA';
+        ctx.beginPath();
+        ctx.ellipse(PLAYER_X + 20, playerY + PLAYER_HEIGHT - 5, 8, 4, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+    
+    // ---------- GAME LOOP ----------
+    function updateGame() {
+      if (!gameRunning) return;
+      
+      updatePhysics();
+      updateObstacles();
+      updateDifficulty();
+      if (checkCollisions()) return;
+      
+      // Spawn obstacles based on rate (faster as speed increases)
+      spawnCounter++;
+      let dynamicRate = Math.max(25, OBSTACLE_SPAWN_RATE - Math.floor(speed / 2));
+      if (spawnCounter >= dynamicRate) {
+        spawnObstacle();
+        spawnCounter = 0;
+      }
+      
+      // Update background scroll
+      bgOffset += speed * 0.5;
+      
+      // Increase score over time
+      score += 0.2;
+      updateUI();
+    }
+    
+    function animate() {
+      updateGame();
+      draw();
+      requestAnimationFrame(animate);
+    }
+    
+    // ---------- RESTART FUNCTION ----------
+    function restartGame() {
+      // Reset all variables
+      gameRunning = true;
+      score = 0;
+      distance = 0;
+      speed = 6;
+      obstacles = [];
+      spawnCounter = 0;
+      playerY = groundY - PLAYER_HEIGHT;
+      playerVelocityY = 0;
+      isJumping = false;
+      chaseProgress = 0;
+      enemyX = -150;
+      frame = 0;
+      
+      // Hide game over UI
+      document.getElementById('gameStatus').classList.add('hidden');
+      updateUI();
+      
+      // Restart music
+      if (bgMusic) {
+        bgMusic.currentTime = 0;
+        bgMusic.play().catch(e => console.log("music restart error", e));
+      } else {
+        initAudio();
+      }
+    }
+    
+    // ---------- EVENT HANDLERS ----------
+    function handleJump(e) {
+      e.preventDefault();
+      jump();
+    }
+    
+    // Touch and mouse events for jumping
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      jump();
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      jump();
+    });
+    
+    // Spacebar and up arrow for keyboard
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+        e.preventDefault();
+        jump();
+      }
+      // Restart with R key
+      if (e.code === 'KeyR' && !gameRunning) {
+        restartGame();
+      }
+    });
+    
+    document.getElementById('restartBtn').addEventListener('click', () => {
+      restartGame();
+    });
+    
+    // Update groundY on resize
+    window.addEventListener('resize', () => {
+      groundY = height - GROUND_Y_OFFSET;
+      if (!gameRunning) return;
+      playerY = Math.min(playerY, groundY - PLAYER_HEIGHT);
+    });
+    
+    // Initialize audio and start
+    initAudio();
+    
+    // Small delay to ensure groundY is correct
+    setTimeout(() => {
+      groundY = height - GROUND_Y_OFFSET;
+      playerY = groundY - PLAYER_HEIGHT;
+      animate();
+    }, 100);
+  })();
+</script>
+</body>
+</html>
